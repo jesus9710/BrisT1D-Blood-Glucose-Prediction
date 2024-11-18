@@ -1,20 +1,20 @@
-# Libs
+#%% Libs
 from pathlib import Path
 import pandas as pd
 
 from utils import *
 
-# Paths
+#%% Paths
 TRAIN_DATA_PATH = Path(__file__).parents[2] / 'Data/train.csv'
 TEST_DATA_PATH = Path(__file__).parents[2] / 'Data/test.csv'
 CLEAN_DATA_PATH = Path(__file__).parents[2] / 'Data/Clean_Data'
 
-# Constants
+#%% Constants
 
 time_window = 4 # past hours to take into account for predictions
-time_len = 2 # length of culsters of 5-minute readings used to calculate an aggregation function
+time_len = 1 # length of culsters of 5-minute readings used to calculate an aggregation function
 
-# Load data
+#%% Load data
 train_raw_data = pd.read_csv(TRAIN_DATA_PATH)
 test_raw_data = pd.read_csv(TEST_DATA_PATH)
 
@@ -22,7 +22,7 @@ raw_dataset = pd.concat([train_raw_data, test_raw_data], axis=0).reset_index(dro
 train_index = range(0, train_raw_data.shape[0])
 test_index = range(train_raw_data.shape[0], raw_dataset.shape[0])
 
-# Dictionaries
+#%% Dictionaries
 
 aerobic_dict = {'Indoor climbing':0,'Run':3,
                          'Strength training':0,'Swim':2,
@@ -48,45 +48,43 @@ anaerobic_dict = {'Indoor climbing':2,'Run':0,
                          'Yoga':0,'Swimming':0,
                          'Weights':3,'Running':0}
 
-# encode activity columns
+#%% encode activity columns
 data_with_scores = encode_activity_columns(raw_dataset, aerobic_dict, anaerobic_dict)
 
-# reduce time window used to predict and expand time between readings
+#%% reduce time window used to predict and expand time between readings
 reduced_data = reduce_time_window(data_with_scores, time_window)
-expanded_time_data = expand_time_clusters(reduced_data, time_len)
+expanded_time_data, new_column_cluster = expand_time_clusters(reduced_data, time_len)
 
-# drop columns
+#%% drop columns
 hr_columns = [col for col in expanded_time_data.columns if re.search('hr_.*', col)]
 filled_data = expanded_time_data.drop(hr_columns, axis=1)
 
-# get dataset grouped by person and time
+#%% get dataset grouped by person and time
 bg_columns = [col for col in expanded_time_data.columns if re.search('bg_.*', col)]
 mean_by_per_and_hour = filled_data.groupby(by=['p_num','time'])[bg_columns].mean()
 
-# get participants with missing values
-p_nums = mean_by_per_and_hour.index.get_level_values('p_num').unique()
+#%% fill missing values in the dataset grouped by person and time
+p_null_list = get_participants_with_null_values(mean_by_per_and_hour)
 
-p_null_list = []
-for p in p_nums:
-    sum_of_nulls = mean_by_per_and_hour.loc[p,:].isnull().sum().sum()
-
-    if sum_of_nulls:
-        p_null_list.append(p)
-
-# fill missing values in the dataset grouped by person and time
 for p_num in p_null_list:
     
-    # get rows to use for interpolation
-    person_dataframe, null_index, null_time_index, time_index_above, time_index_bellow = get_time_indexes(p_num, mean_by_per_and_hour)
-
     # fill missing values by interpolation
-    fill_missing_values_by_interpolation(mean_by_per_and_hour, p_num, null_time_index, time_index_above, time_index_bellow)
+    mean_by_per_and_hour = interpolate_and_fill_rows(p_num, mean_by_per_and_hour, n_iters = 10)
 
-# use dataset grouped by person and time to impute missing values in the original dataset
+#%% interpolation through columns
+
+p_null_list = get_participants_with_null_values(mean_by_per_and_hour)
+
+for p_num in p_null_list:
+
+    mean_by_per_and_hour = interpolate_and_fill_columns(p_num, mean_by_per_and_hour, bg_columns)
+
+#%% use dataset grouped by person and time to impute missing values in the original dataset
 merged_data = filled_data.merge(mean_by_per_and_hour, on=['p_num', 'time'], suffixes=('', '_mean'))
 for col in bg_columns:
     filled_data[col] = filled_data[col].fillna(merged_data[col + '_mean'])
 
+# export to csv
 clean_train_data = filled_data.iloc[train_index,:]
 clean_test_data = filled_data.iloc[test_index,:]
 

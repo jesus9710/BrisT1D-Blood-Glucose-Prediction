@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import re
 from datetime import datetime
+from datetime import timedelta
 
 def anaerobic_time_function(x):
     return (1-1/(1+5*np.exp(-(x)*2)))
@@ -119,7 +120,7 @@ def expand_time_clusters(df, time_len):
 
     expanded_time_data = pd.concat([expanded_time_data, pd.DataFrame(reduced_data_dict)], axis=1)
 
-    return expanded_time_data
+    return expanded_time_data, new_column_clusters
 
 def get_null_index_from_list(df, list_of_index):
     '''
@@ -135,10 +136,11 @@ def get_null_index_from_list(df, list_of_index):
 
     return indexes, position
 
-def get_time_indexes(p_num, mean_by_per_and_hour):
+def get_null_time_indexes(p_num, mean_by_per_and_hour):
     '''
-    This function is used to obtain indexes with null values and the rows needed to interpolate those values.
+    This function is used to obtain indexes with null values.
     '''
+
     # get provisional dataset for a person and get the null index
     person_dataframe = mean_by_per_and_hour.loc[p_num,:].reset_index().sort_values(by='time').copy()
     person_mask = person_dataframe.isnull().any(axis=1)
@@ -148,12 +150,56 @@ def get_time_indexes(p_num, mean_by_per_and_hour):
 
     person_dataframe = person_dataframe.set_index('time')
 
+    return person_dataframe, null_index, null_time_index
+
+def fill_missing_values_by_interpolation(mean_by_per_and_hour, p_num, null_time_index, time_index_above, time_index_bellow):
+    '''
+    This function is used to interpolate missing values from two other rows
+    '''
+    # fill missing values with a weighted average of rows above and bellow
+    for idx, index in enumerate(null_time_index):
+    
+        # get rows above and bellow
+        readings_above = mean_by_per_and_hour.loc[(p_num, (time_index_above[idx])), :].copy()
+        readings_bellow = mean_by_per_and_hour.loc[(p_num, (time_index_bellow[idx])), :].copy()
+
+        # get times for each rows
+        start_time = datetime.strptime(time_index_above[idx], '%H:%M:%S')
+        current_time = datetime.strptime(index, '%H:%M:%S')
+        end_time = datetime.strptime(time_index_bellow[idx], '%H:%M:%S')
+
+        # if one time correspond to another day, adjust it
+        if start_time > current_time:
+            start_time -= timedelta(days=1)
+
+        if end_time < current_time:
+            end_time += timedelta(days=1)
+
+        # get time differences (hours)
+        time_diff = (end_time - start_time).total_seconds() / 3600
+        start_diff = (current_time - start_time).total_seconds() / 3600
+        end_diff = (end_time - current_time).total_seconds() / 3600
+
+        # get weights for rows above and below
+        time_above_weight = 1 - start_diff / time_diff
+        time_bellow_weight = 1 - end_diff / time_diff
+
+        # use the weights to interpolate missing values
+        weighted_mean_row = time_above_weight * readings_above + time_bellow_weight * readings_bellow
+        mean_by_per_and_hour.loc[(p_num, index), :] = mean_by_per_and_hour.loc[(p_num, index), :].fillna(weighted_mean_row)
+
+    return mean_by_per_and_hour
+
+def interpolate_and_fill_rows(p_num, mean_by_per_and_hour, n_iters):
+
+    # get null time indexes
+    person_dataframe, null_index, null_time_index = get_null_time_indexes(p_num, mean_by_per_and_hour)
+
     # Get adapters to obtain rows bellow and above
     num_index_adapter_1 = np.array(list(null_index))
     num_index_adapter_2 = np.array(list(null_index))
 
-    # In this loop it is checked whether or not rows above or bellow also have null values. If so, then get the next ones
-    for i in range(10):
+    for j in range(n_iters):
 
         # Manage when hourly indexes correspond to first hour in the morning or last hour in the evening
         for i in range(len(null_index)):
@@ -167,52 +213,50 @@ def get_time_indexes(p_num, mean_by_per_and_hour):
         time_index_above = list(person_dataframe.iloc[num_index_adapter_1-1,:].index)
         time_index_bellow = list(person_dataframe.iloc[num_index_adapter_2+1,:].index)
 
-        # get time index in rows above and bellow that also have null values 
-        time_above_null_index, _ = get_null_index_from_list(person_dataframe, time_index_above)
-        time_bellow_null_index, _ = get_null_index_from_list(person_dataframe, time_index_bellow)
+        # interpolate and fill missing values
+        mean_by_per_and_hour = fill_missing_values_by_interpolation(mean_by_per_and_hour, p_num, null_time_index, time_index_above, time_index_bellow)
 
-        # if rows above or bellow also have null values, then get the next one
-        if time_above_null_index:
-            num_index_adapter_1 += -1
-
-        if time_bellow_null_index:
-            num_index_adapter_2 += 1
+        num_index_adapter_1 -= 1
+        num_index_adapter_2 += 1
         
-        if not(time_bellow_null_index or time_above_null_index):
-            break
+    return mean_by_per_and_hour
 
-    return person_dataframe, null_index, null_time_index, time_index_above, time_index_bellow
+def interpolate_and_fill_columns(p_num, mean_by_per_and_hour, set_columns):
 
-def fill_missing_values_by_interpolation(mean_by_per_and_hour, p_num, null_time_index, time_index_above, time_index_bellow):
-    '''
-    This function is used to interpolate missing values from two other rows
-    '''
-    # fill missing values with a weighted average of rows above and bellow
-    for idx, index in enumerate(null_time_index):
-    
-        # get rows above and bellow
-        readings_above = mean_by_per_and_hour.loc[(p_num, (time_index_above[idx])), :].copy()
-        readings_bellow = mean_by_per_and_hour.loc[(p_num, (time_index_bellow[idx])), :].copy()
+    person_dataframe = mean_by_per_and_hour.loc[p_num,:].reset_index().sort_values(by='time').copy()
+    index = list(person_dataframe['time'])
 
-        if readings_above.isnull().sum() > 0 or readings_bellow.isnull().sum() > 0:
+    for idx, col in enumerate(set_columns[:-1]):
+
+        if idx == 0:
+            right_column = person_dataframe[set_columns[idx+1]]
+            right_column.index = index
+            mean_by_per_and_hour.loc[p_num, col] = mean_by_per_and_hour.loc[p_num, col].fillna(right_column, axis=0).to_numpy()
+
+            continue
+        
+        left_column = person_dataframe[set_columns[idx-1]]
+        right_column = person_dataframe[set_columns[idx+1]]
+
+        if left_column.isnull().sum() > 0 or right_column.isnull().sum() > 0:
             continue
 
-        # get times for each rows
-        start_time = datetime.strptime(time_index_above[idx], '%H:%M:%S')
-        current_time = datetime.strptime(index, '%H:%M:%S')
-        end_time = datetime.strptime(time_index_bellow[idx], '%H:%M:%S')
-
-        start_hour = start_time.hour + start_time.minute / 60
-        current_hour = current_time.hour + current_time.minute / 60
-        end_hour = end_time.hour + end_time.minute / 60
-
-        # get weights for rows above and below
-        time_diff = np.abs(end_hour-start_hour)
-        time_above_weight = 1 - np.abs(current_hour-start_hour) / time_diff
-        time_bellow_weight = 1 - np.abs(current_hour-end_hour) / time_diff
-
-        # use the weights to interpolate missing values
-        weighted_mean_row = time_above_weight * readings_above + time_bellow_weight * readings_bellow
-        mean_by_per_and_hour.loc[(p_num, index), :] = mean_by_per_and_hour.loc[(p_num, index), :].fillna(weighted_mean_row)
+        else:
+            mean_values = left_column + right_column / 2
+            mean_values.index = index
+            mean_by_per_and_hour.loc[p_num, col] = mean_by_per_and_hour.loc[p_num, col].fillna(mean_values, axis=0).to_numpy()
 
     return mean_by_per_and_hour
+
+def get_participants_with_null_values(mean_by_per_and_hour):
+
+    p_nums = mean_by_per_and_hour.index.get_level_values('p_num').unique()
+
+    p_null_list = []
+    for p in p_nums:
+        sum_of_nulls = mean_by_per_and_hour.loc[p,:].isnull().sum().sum()
+
+        if sum_of_nulls:
+            p_null_list.append(p)
+
+    return p_null_list

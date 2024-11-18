@@ -6,6 +6,7 @@ from xgboost import XGBRegressor
 from sklearn.model_selection import GroupKFold
 from sklearn.metrics import root_mean_squared_error
 from sklearn.ensemble import VotingRegressor
+from matplotlib import pyplot as plt
 
 #%% paths
 
@@ -16,7 +17,7 @@ SUBMISSION_PATH = Path(__file__).parents[2] / 'submissions'
 
 #%% constants
 
-submission_name = 'NoFE_10minsAGG_3VR_XGBoost_optimized_CV.csv'
+submission_name = 'Some_FE_5mins_3VR_XGBoost_optimized_CV.csv'
 n_splits = 9
 
 #%%
@@ -53,7 +54,8 @@ for fold in range(n_splits):
     y_train = df_train['bg+1:00']
     y_val = df_val['bg+1:00']
 
-    model = VotingRegressor([(f"XGB_{i}", XGBRegressor(random_state=i, **XGBparams)) for i in range(3)])
+    model = XGBRegressor(random_state=42, **XGBparams)
+    #model = VotingRegressor([(f"XGB_{i}", XGBRegressor(random_state=i, **XGBparams)) for i in range(3)])
     model.fit(X_train, y_train)
     score = root_mean_squared_error(y_val, model.predict(X_val))
 
@@ -62,6 +64,13 @@ for fold in range(n_splits):
 
 print(scores)
 print(np.mean(scores))
+
+#%%
+
+f_importances = pd.Series(model.feature_importances_, index=X_train.columns).sort_values(ascending=False)
+
+f_importances_trucated = f_importances.iloc[0:20]
+plt.barh(f_importances_trucated.index, f_importances_trucated.values)
 
 # %% get predictions
 
