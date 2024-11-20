@@ -179,5 +179,10 @@ pyrightconfig.json
 *.csv
 *.bin
 *.txt
+*.cbm
+*.tmp
+*.tfevents
+*.tsv
+*.json
 
 # End of https://www.toptal.com/developers/gitignore/api/python

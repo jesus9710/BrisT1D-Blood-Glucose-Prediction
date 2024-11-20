@@ -1,17 +1,17 @@
-#%% libs
+# libs
 import numpy as np
 import pandas as pd
 from pathlib import Path
 from datetime import datetime
 import re
 
-#%% paths
+# paths
 CLEAN_DATA_PATH = Path(__file__).parents[2] / 'Data/Clean_Data'
 TRAIN_DATA_FILE = CLEAN_DATA_PATH / 'clean_train.csv'
 TEST_DATA_FILE = CLEAN_DATA_PATH / 'clean_test.csv'
 EXTENDED_DATA_PATH = Path(__file__).parents[2] / 'Data/Extended_Data'
 
-#%% load data
+# load data
 train = pd.read_csv(TRAIN_DATA_FILE)
 test = pd.read_csv(TEST_DATA_FILE)
 dataset = pd.concat([train,test], axis=0).reset_index(drop=True)
@@ -19,8 +19,10 @@ dataset = pd.concat([train,test], axis=0).reset_index(drop=True)
 train_index = range(0, train.shape[0])
 test_index = range(train.shape[0], dataset.shape[0])
 
-#%% feature engineering function
+# feature engineering function
 def feature_eng(df):
+
+    time_between_readings = 5
 
     bg_columns = [col for col in df.columns if re.search('bg_.*', col)]
     ins_columns = [col for col in df.columns if re.search('insulin_.*', col)]
@@ -34,11 +36,11 @@ def feature_eng(df):
     mean_by_per_and_hour_step = df.groupby(by=['p_num','time'])[step_columns].mean()
     mean_by_per_and_hour_cal = df.groupby(by=['p_num','time'])[cal_columns].mean()
 
-    merged_data_bg = df.merge(mean_by_per_and_hour_bg, on=['p_num','time'], suffixes=['','_mean'])
-    merged_data_ins = df.merge(mean_by_per_and_hour_ins, on=['p_num','time'], suffixes=['','_mean'])
-    merged_data_carb = df.merge(mean_by_per_and_hour_carb, on=['p_num','time'], suffixes=['','_mean'])
-    merged_data_step = df.merge(mean_by_per_and_hour_step, on=['p_num','time'], suffixes=['','_mean'])
-    merged_data_cal = df.merge(mean_by_per_and_hour_cal, on=['p_num','time'], suffixes=['','_mean'])
+    merged_data_bg = df.merge(mean_by_per_and_hour_bg, on=['p_num','time'], suffixes=['','_mean']).copy()
+    merged_data_ins = df.merge(mean_by_per_and_hour_ins, on=['p_num','time'], suffixes=['','_mean']).copy()
+    merged_data_carb = df.merge(mean_by_per_and_hour_carb, on=['p_num','time'], suffixes=['','_mean']).copy()
+    merged_data_step = df.merge(mean_by_per_and_hour_step, on=['p_num','time'], suffixes=['','_mean']).copy()
+    merged_data_cal = df.merge(mean_by_per_and_hour_cal, on=['p_num','time'], suffixes=['','_mean']).copy()
 
     hours = pd.to_datetime(df['time'], format='%H:%M:%S').dt.hour
     minutes = pd.to_datetime(df['time'], format='%H:%M:%S').dt.minute
@@ -71,9 +73,9 @@ def feature_eng(df):
     df['ins_change_ratio'] = df[ins_columns[-1]] / (df[ins_columns[-2]] + 0.01)
     df['carb_change_ratio'] = df[carb_columns[-1]] / (df[carb_columns[-2]] + 0.01)
 
-    df['bg_change_diff'] = df[bg_columns[-1]] - df[bg_columns[-2]]
-    df['ins_change_diff'] = df[ins_columns[-1]] - df[ins_columns[-2]]
-    df['carb_change_diff'] = df[carb_columns[-1]] - df[carb_columns[-2]]
+    df['bg_change_diff'] = (df[bg_columns[-1]] - df[bg_columns[-2]]) / time_between_readings
+    df['ins_change_diff'] = (df[ins_columns[-1]] - df[ins_columns[-2]]) / time_between_readings
+    df['carb_change_diff'] = (df[carb_columns[-1]] - df[carb_columns[-2]]) / time_between_readings
 
     df['bg_last_6steps_mean'] = df[bg_columns[-6:]].mean(axis=1)
     df['ins_last_6steps_mean'] = df[ins_columns[-6:]].mean(axis=1)
@@ -95,13 +97,13 @@ def feature_eng(df):
 
     return df
 
-# import csv
+# apply feature engineering
 extended_dataset = feature_eng(dataset)
 
-#%%
+# obtain train and test data
 extended_train = extended_dataset.iloc[train_index,:].reset_index(drop=True)
 extended_test = extended_dataset.iloc[test_index,:].reset_index(drop=True)
 
-#%%
+# export csv
 extended_train.to_csv(EXTENDED_DATA_PATH / 'extended_train.csv',index=False)
 extended_test.to_csv(EXTENDED_DATA_PATH / 'extended_test.csv',index=False)

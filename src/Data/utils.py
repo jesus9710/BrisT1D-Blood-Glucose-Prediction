@@ -10,15 +10,18 @@ def anaerobic_time_function(x):
 def aerobic_time_function(x):
     return (1-1/(1+8*np.exp(-(x)*1.5)))
 
-def encode_activity_columns(df, aerobic_dict, anaerobic_dict):
+def encode_activity_columns(df, aerobic_dict, anaerobic_dict, effort_dict = None):
+    '''
+    This function is used to encode the activity columns. In addition, two other columns representing anaerobic and aerobic scores will be generated.
+    '''
 
     columns = list(df.columns)
     activity_columns = [col for col in columns if re.search(r'activity-.*', col)]
 
     data_with_scores = df.copy()
 
-    # fill missing values with 0. In most cases, it is logical to assume that the participant did not play sports.
-    data_with_scores[activity_columns] = data_with_scores[activity_columns].fillna(value=0)
+    # fill missing values with None, then they will be replaced by 0. It is logical to assume that these participant did not play sports.
+    data_with_scores[activity_columns] = data_with_scores[activity_columns].fillna(value='None')
 
     aerobic_scores_dict = {}
     anaerobic_scores_dict = {}
@@ -35,6 +38,14 @@ def encode_activity_columns(df, aerobic_dict, anaerobic_dict):
         aerobic_scores_dict['A-'+ hour_str] = data_with_scores[col].map(aerobic_dict).astype('float') * aerobic_time_function(hour)
         anaerobic_scores_dict['AN-'+ hour_str] = data_with_scores[col].map(anaerobic_dict).astype('float') * anaerobic_time_function(hour)
 
+        # encode the original column
+        if effort_dict:
+            data_with_scores[col] = data_with_scores[col].map(effort_dict).astype('int')
+    
+    # if effort dict not include, original activity columns will be dropped
+    if not(effort_dict):
+        data_with_scores = data_with_scores.drop(activity_columns, axis=1)
+
     # obtain the sums of aerobic and anaerobic scores along time axis
     activity_scores_df = pd.concat([pd.DataFrame(aerobic_scores_dict),pd.DataFrame(anaerobic_scores_dict)], axis=1)
 
@@ -44,13 +55,15 @@ def encode_activity_columns(df, aerobic_dict, anaerobic_dict):
     sum_aerobic_scores_df = activity_scores_df[aerobic_columns].sum(axis=1).to_frame(name='Aerobic_score')
     sum_anaerobic_scores_df = activity_scores_df[anaerobic_columns].sum(axis=1).to_frame(name='Anaerobic_score')
 
-    # drop original columns and add the new ones
-    data_with_scores = data_with_scores.drop(activity_columns, axis=1)
+    # add new columns
     data_with_scores = pd.concat([data_with_scores, sum_aerobic_scores_df, sum_anaerobic_scores_df], axis=1)
 
     return data_with_scores
 
 def reduce_time_window(df, time_window):
+    '''
+    Function for reducing time window used for bg regression
+    '''
 
     reduced_data = df.copy()
     columns = list(reduced_data.columns)
@@ -62,15 +75,83 @@ def reduce_time_window(df, time_window):
 
     return reduced_data
 
+def generate_time_lags(column_names, hours):
+    '''
+    generate column names for each category in 5-minute intervals
+    '''
+
+    new_column_names = {}
+    for name in column_names:
+        h_list = []
+
+        for h in range(hours):
+            h_list += [f'{name}-{h}:0'+str(i) if i<10 else f'{name}-{h}:'+str(i) for i in range(0,60,5)]
+
+        new_column_names.update({name:h_list})
+
+    return new_column_names
+
+def expand_data(df, time_window):
+    '''
+    Get more data by reducing time window used for predictions
+    '''
+    
+    columns = list(df.columns)
+    not_time_columns = [col for col in columns if not(re.search(r'[0-9]:[0-9].*',col))]
+    column_filter = [r'bg-.*',r'insulin-.*',r'carbs-.*',r'hr-.*',r'steps-.*',r'cals-.*',r'activity-.*']
+    
+    # get time window for original dataset
+    start_time = datetime.strptime(str(6 - time_window), '%H')
+    end_time = start_time + timedelta(hours=time_window-1, minutes=55)
+
+    old_columns = []
+    new_columns = []
+
+    for filter in column_filter:
+        
+        # get new column names by generating a new time window
+        name = filter.split('-')[0]
+        column_group = [col for col in columns if re.search(filter,col)]
+        new_columns += list(generate_time_lags([name], time_window).values())[0]
+
+        old_columns_aux = []
+
+        # get column names of original dataset that represents the time window
+        for col in column_group:
+            column_date = datetime.strptime(col.split('-')[1],'%H:%M')
+
+            if (column_date >= start_time) and (column_date<=end_time):
+                old_columns_aux.append(col)
+
+        old_columns_aux.sort()
+        old_columns += old_columns_aux
+    
+    # get the new bg+1:00
+    new_bgp1h = (start_time - timedelta(hours=1)).time().isoformat(timespec='minutes')
+
+    # create the new dataframe, modify current time variable and assign new ids
+    new_df = df[not_time_columns].copy()
+    new_df['time'] = (pd.to_datetime(new_df['time'],format='%H:%M:%S') - timedelta(hours=6-time_window)).dt.time.astype('str')
+    new_df['bg+1:00'] = df['bg-'+str(new_bgp1h[1:])].copy()
+    new_df['id'] = new_df['id'] + '_new'
+
+    #get the rest variables from original df
+    renamed_df = df[old_columns].copy()
+    renamed_df.columns = new_columns
+
+    new_df = pd.concat([new_df, renamed_df], axis=1)
+
+    return new_df.dropna(subset=['bg+1:00'])
+
 def expand_time_clusters(df, time_len):
 
-    expanded_time_data = df[['id','p_num','time','bg+1:00','Aerobic_score','Anaerobic_score']].copy()
-
     columns = list(df.columns)
-    column_filter = [r'bg-.*',r'insulin-.*',r'carbs-.*',r'hr-.*',r'steps-.*',r'cals-.*']
+    column_filter = [r'bg-.*',r'insulin-.*',r'carbs-.*',r'hr-.*',r'steps-.*',r'cals-.*',r'activity-.*']
 
     column_clusters = {}
     column_cluster_aux = []
+
+    expanded_time_data = df.drop([col for col in columns if re.search('-[0-9]:[0-9].*',col)], axis=1).copy()
 
     # Get dictionary with column clusters
     for filter in column_filter:
@@ -93,7 +174,7 @@ def expand_time_clusters(df, time_len):
 
         new_column_clusters.update({key : time_clusters})
 
-    operation_dict = {'bg' : 'mean','insulin':'sum','carbs':'sum','hr':'mean','steps':'sum','cals':'sum'}
+    operation_dict = {'bg' : 'mean','insulin':'sum','carbs':'sum','hr':'mean','steps':'sum','cals':'sum','activity':'sum'}
 
     # Define aggrgation functions
     def apply_operation(df, operation):
@@ -113,14 +194,13 @@ def expand_time_clusters(df, time_len):
 
     # Apply one operation to each type of column in order to aggregate time window vectors 
     for col, new_col_dict in new_column_clusters.items():
-
         for new_col, time_clust in new_col_dict.items():
 
             reduced_data_dict[new_col] = apply_operation(df[time_clust], operation_dict[col])
 
     expanded_time_data = pd.concat([expanded_time_data, pd.DataFrame(reduced_data_dict)], axis=1)
 
-    return expanded_time_data, new_column_clusters
+    return expanded_time_data
 
 def get_null_index_from_list(df, list_of_index):
     '''
@@ -191,6 +271,9 @@ def fill_missing_values_by_interpolation(mean_by_per_and_hour, p_num, null_time_
     return mean_by_per_and_hour
 
 def interpolate_and_fill_rows(p_num, mean_by_per_and_hour, n_iters):
+    '''
+    This function is used to fill null values by interpolating along axis 0
+    '''
 
     # get null time indexes
     person_dataframe, null_index, null_time_index = get_null_time_indexes(p_num, mean_by_per_and_hour)
@@ -222,25 +305,32 @@ def interpolate_and_fill_rows(p_num, mean_by_per_and_hour, n_iters):
     return mean_by_per_and_hour
 
 def interpolate_and_fill_columns(p_num, mean_by_per_and_hour, set_columns):
+    '''
+    This function is used to fill null values by interpolating along axis 1
+    '''
 
+    # get bg mean by hour for participant i
     person_dataframe = mean_by_per_and_hour.loc[p_num,:].reset_index().sort_values(by='time').copy()
     index = list(person_dataframe['time'])
 
     for idx, col in enumerate(set_columns[:-1]):
 
+        # The first column cannot be interpolated. It is inferred from the following column
         if idx == 0:
-            right_column = person_dataframe[set_columns[idx+1]]
+            right_column = person_dataframe[set_columns[idx+1]].copy()
             right_column.index = index
             mean_by_per_and_hour.loc[p_num, col] = mean_by_per_and_hour.loc[p_num, col].fillna(right_column, axis=0).to_numpy()
 
             continue
         
-        left_column = person_dataframe[set_columns[idx-1]]
-        right_column = person_dataframe[set_columns[idx+1]]
+        # get the following and previous columns
+        left_column = person_dataframe[set_columns[idx-1]].copy()
+        right_column = person_dataframe[set_columns[idx+1]].copy()
 
+        # if the following or previous columns have missing values, they can not be used to interpolate
         if left_column.isnull().sum() > 0 or right_column.isnull().sum() > 0:
             continue
-
+        
         else:
             mean_values = left_column + right_column / 2
             mean_values.index = index
@@ -249,6 +339,9 @@ def interpolate_and_fill_columns(p_num, mean_by_per_and_hour, set_columns):
     return mean_by_per_and_hour
 
 def get_participants_with_null_values(mean_by_per_and_hour):
+    '''
+    Get a list with participants who have null values in their data grouped by hour
+    '''
 
     p_nums = mean_by_per_and_hour.index.get_level_values('p_num').unique()
 
