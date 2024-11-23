@@ -88,6 +88,10 @@ class XGB_VotingRegressor(Base_VotingRegressor):
 
             model.save_model(file_name / (file_name.name + '_' + str(idx) + '.bin'))
 
+    def get_feature_names(self):
+
+        return self.trained_models[0].feature_names
+
     @classmethod
     def load(cls, path):
 
@@ -129,6 +133,10 @@ class CatBst_Voting_Regressor(Base_VotingRegressor):
         for idx, model in enumerate(self.trained_models):
 
             model.save_model(file_name / (file_name.name + '_' + str(idx) + '.cbm'))
+
+    def get_feature_names(self):
+
+        return self.trained_models[0].feature_names_
 
     @classmethod
     def load(cls, path):

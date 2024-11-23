@@ -143,7 +143,7 @@ def expand_data(df, time_window):
 
     return new_df.dropna(subset=['bg+1:00'])
 
-def expand_time_clusters(df, time_len):
+def expand_time_clusters(df, time_len, skipna = True):
 
     columns = list(df.columns)
     column_filter = [r'bg-.*',r'insulin-.*',r'carbs-.*',r'hr-.*',r'steps-.*',r'cals-.*',r'activity-.*']
@@ -182,13 +182,13 @@ def expand_time_clusters(df, time_len):
         match operation:
 
             case 'sum':
-                return df.sum(axis=1)
+                return df.sum(axis=1, skipna=skipna)
 
             case 'mean':
-                return df.mean(axis=1)
+                return df.mean(axis=1, skipna=skipna)
 
             case _:
-                return df.sum(axis=1)
+                return df.sum(axis=1, skipna=skipna)
 
     reduced_data_dict = {}
 
@@ -353,3 +353,88 @@ def get_participants_with_null_values(mean_by_per_and_hour):
             p_null_list.append(p)
 
     return p_null_list
+
+def impute_and_encode_hr(df, encode_dictionary, steps_to_impute, drop_other_cols):
+    '''
+    This function is used to encode and impute the current heart rate.
+    The encoding is done by creating differents groups or ranges
+    The imputation is done with the values from previous steps. Then, the rest of missing values are imputed with the mean.
+    '''
+
+    # get columns needed for imputation
+    hr_columns = [col for col in df.columns if re.search('hr_.*',col)]
+    current_index = len(hr_columns)
+    columns_for_imputation = [f'hr_{i}' for i in range(current_index, current_index-steps_to_impute-1,-1)]
+    column_to_impute, columns_for_imputation = (columns_for_imputation[0], columns_for_imputation[1:])
+
+    # imputation with values from previous steps
+    for col in list(columns_for_imputation):
+        df[column_to_impute] = df[column_to_impute].fillna(df[col])
+    
+    # imputation with mean value
+    mean_value = df[column_to_impute].mean()
+    df[column_to_impute] = df[column_to_impute].fillna(mean_value)
+
+    # encoding
+    bins = list(encode_dictionary.values())
+    labels = range(1,len(bins))
+    df[f'current_hr'] = pd.cut(df[f'hr_{current_index}'], bins=bins, labels=labels, right=True)
+    
+    if drop_other_cols:
+        df = df.drop(hr_columns, axis=1) 
+
+    return df
+
+def impute_cals(cals_mean_by_per_and_hour, impute_dict=None):
+    '''
+    This function is used to impute missing values of burnt calories
+    '''
+
+    # obtain participants with missing calorie values, in the dataset grouped by p_num and time
+    nulls_count = cals_mean_by_per_and_hour.groupby('p_num').apply(lambda group: group.isnull().sum()).sum(axis=1)
+    p_nums = nulls_count[nulls_count>0].index
+
+    for p_num in p_nums:
+        
+        # get participant dataset grouped by time
+        person_dataframe = cals_mean_by_per_and_hour.loc[p_num]
+        null_index = person_dataframe.isnull().any(axis=1)[person_dataframe.isnull().any(axis=1)].index
+
+        # if the sleep factor is applied to a participant, it is assumed that the missing values correspond to nighttime hours
+        if impute_dict:
+            sleep_factor = impute_dict[p_num] if p_num in impute_dict.keys() else 1
+        else:
+            sleep_factor = 1
+
+        # get the basal metabolic rate (BMR) to impute missing values in the dataset grouped by p_num and time
+        daily_cals = cals_mean_by_per_and_hour.loc[p_num].sum(axis=0)
+        not_null_cals_count = cals_mean_by_per_and_hour.loc[p_num].apply(lambda group: group.notnull().sum())
+
+        BMR = (daily_cals / not_null_cals_count).median()
+
+        # impute missing values with BMR
+        for index in null_index:
+            cals_mean_by_per_and_hour.loc[(p_num,index),:] = cals_mean_by_per_and_hour.loc[(p_num,index),:].fillna(BMR*sleep_factor)
+
+    return cals_mean_by_per_and_hour
+
+def mean_ffill_bfill_imputation(df, columns):
+
+    df_ffill = df.copy()
+    df_ffill[columns] = df_ffill[columns].fillna(method='ffill', axis=1)
+
+    df_bfill = df.copy()
+    df_bfill[columns] = df_bfill[columns].fillna(method='bfill', axis=1)
+
+    ffill_cols = df_ffill[columns].fillna(df_bfill[columns])
+    bfill_cols = df_bfill[columns].fillna(df_ffill[columns])
+
+    df_ffill[columns] = ffill_cols
+    df_bfill[columns] = bfill_cols
+
+    df_combined = df.copy()
+    df_combined[columns] = (df_ffill[columns] + df_bfill[columns]) / 2
+
+    df[columns] = df[columns].fillna(df_combined[columns])
+
+    return df

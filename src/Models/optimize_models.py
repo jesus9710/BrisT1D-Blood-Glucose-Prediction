@@ -1,11 +1,7 @@
 # libs
-import numpy as np
 import pandas as pd
 from pathlib import Path
-from xgboost import XGBRegressor
 from sklearn.model_selection import GroupKFold
-from sklearn.metrics import root_mean_squared_error
-from sklearn.ensemble import VotingRegressor
 from optimizers import *
 import optuna
 
@@ -15,15 +11,16 @@ TRAIN_DATA_FILE = DATA_PATH / 'extended_train.csv'
 SUBMISSION_PATH = Path(__file__).parents[2] / 'submissions'
 
 # constants
-model_architecture = "CatBoost"
+model_architecture = "XGBoost"
 optimize_optuna = True
-n_splits = 5
-subsample_quantity = 50000
-n_trials = 50
+n_splits = 9
+subsample_quantity = 0
+n_trials = 200
 
 # load data
 train = pd.read_csv(TRAIN_DATA_FILE)
-train = train.sample(subsample_quantity, random_state=42).reset_index(drop=True)
+if subsample_quantity:
+    train = train.sample(subsample_quantity, random_state=42).reset_index(drop=True)
 
 # get splits grouped by participants
 gkf = GroupKFold(n_splits)

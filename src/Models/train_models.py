@@ -6,7 +6,7 @@ import xgboost as xgb
 from catboost import Pool
 from sklearn.model_selection import GroupKFold
 from sklearn.metrics import root_mean_squared_error
-from Models.model_wrappers import XGB_VotingRegressor, CatBst_Voting_Regressor
+from model_wrappers import XGB_VotingRegressor, CatBst_Voting_Regressor
 import os
 
 # paths
@@ -15,8 +15,8 @@ TRAIN_DATA_FILE = DATA_PATH / 'extended_train.csv'
 MODEL_PATH = Path(__file__).parents[2] / 'Models'
 
 # constants
-model_architecture = "CatBoost"
-model_name = 'EDx1_Some_FE_5mins_3VR_CatBoost_optimized_CV_v2'
+model_architecture = "XGBoost"
+model_name = 'EDx1_FEv3_5mins_3VR_XGBoost_optimized_CV'
 n_splits = 9
 save_model = True
 
@@ -36,25 +36,14 @@ if model_architecture == "XGBoost":
     XGB_models = []
     scores = []
 
-    XGBparams = {'lambda': 0.00017826413308577333,
-        'alpha': 1.6906439156282021e-06,
-        'min_child_weight': 12.62231594443773,
-        'max_depth': 12,
+    XGBparams = {'lambda': 3.195497106644513,
+        'alpha': 0.0005344179104573683,
+        'min_child_weight': 5.930771819870066,
+        'max_depth': 10,
         'gamma': 5,
-        'subsample': 0.8749869503982316,
-        'colsample_bytree': 0.920081529416236,
-        'max_leaves': 87,
-        'device':'gpu'}
-
-    '''XGBparams = {'lambda': 0.16013242438368455,
-        'alpha': 2.59e-07,
-        'min_child_weight': 11.515526188745607,
-        'max_depth': 9,
-        'gamma': 2,
-        'subsample': 0.8266374812481546,
-        'colsample_bytree': 0.5786151538882082,
-        'max_leaves': 51,
-        'device':'gpu'}'''
+        'subsample': 0.9636084568535752,
+        'colsample_bytree': 0.9977803068417529,
+        'max_leaves': 59}
 
     for fold in range(n_splits):
 
