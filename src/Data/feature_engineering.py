@@ -24,83 +24,103 @@ def feature_eng(df):
 
     bg_columns = [col for col in df.columns if re.search('bg_.*', col)]
     ins_columns = [col for col in df.columns if re.search('insulin_.*', col)]
-    carb_columns = [col for col in df.columns if re.search('carbs_.*', col)]
+    hr_columns = [col for col in df.columns if re.search('hr_.*', col)]
     step_columns = [col for col in df.columns if re.search('steps_.*', col)]
     cal_columns = [col for col in df.columns if re.search('cals_.*', col)]
 
     mean_by_per_and_hour_bg = df.groupby(by=['p_num','time'])[bg_columns].mean()
     mean_by_per_and_hour_ins = df.groupby(by=['p_num','time'])[ins_columns].mean()
-    mean_by_per_and_hour_carb = df.groupby(by=['p_num','time'])[carb_columns].mean()
     mean_by_per_and_hour_step = df.groupby(by=['p_num','time'])[step_columns].mean()
     mean_by_per_and_hour_cal = df.groupby(by=['p_num','time'])[cal_columns].mean()
 
     merged_data_bg = df.merge(mean_by_per_and_hour_bg, on=['p_num','time'], suffixes=['','_mean']).copy()
     merged_data_ins = df.merge(mean_by_per_and_hour_ins, on=['p_num','time'], suffixes=['','_mean']).copy()
-    merged_data_carb = df.merge(mean_by_per_and_hour_carb, on=['p_num','time'], suffixes=['','_mean']).copy()
     merged_data_step = df.merge(mean_by_per_and_hour_step, on=['p_num','time'], suffixes=['','_mean']).copy()
     merged_data_cal = df.merge(mean_by_per_and_hour_cal, on=['p_num','time'], suffixes=['','_mean']).copy()
 
     hours = pd.to_datetime(df['time'], format='%H:%M:%S').dt.hour
     minutes = pd.to_datetime(df['time'], format='%H:%M:%S').dt.minute
 
+    # time transformations variables
     df['time_hour_sin'] = np.sin(2 * np.pi * hours / 24)
     df['time_hour_cos'] = np.cos(2 * np.pi * hours / 24)
     df['time_min_sin'] = np.sin(2 * np.pi * minutes / 24)
     df['time_min_cos'] = np.cos(2 * np.pi * minutes / 24)
 
+    # difference between the variable at the current point in time and the average value per participant at the current point in time
     df['c_bg_mean_diff'] = df[bg_columns[-1]] - merged_data_bg[bg_columns[-1]+ '_mean']
-    df['c_ins_mean_diff'] = df[ins_columns[-1]] - merged_data_ins[ins_columns[-1]+ '_mean']
-    # df['c_carb_mean_diff'] = df[carb_columns[-1]] - merged_data_carb[carb_columns[-1]+ '_mean']
+    # df['c_ins_mean_diff'] = df[ins_columns[-1]] - merged_data_ins[ins_columns[-1]+ '_mean']
     df['c_step_mean_diff'] = df[step_columns[-1]] - merged_data_step[step_columns[-1]+ '_mean']
     df['c_cal_mean_diff'] = df[cal_columns[-1]] - merged_data_cal[cal_columns[-1]+ '_mean']
 
+    # ratios between the variable at the current point in time and the average value per participant at the current point in time
     df['c_ins_mean_ratio'] = df[ins_columns[-1]] / (merged_data_ins[ins_columns[-1]+ '_mean'] + 0.01)
-    # df['c_carb_mean_ratio'] = df[carb_columns[-1]] / (merged_data_carb[carb_columns[-1]+ '_mean'] + 0.01)
     df['c_step_mean_ratio'] = df[step_columns[-1]] / (merged_data_step[step_columns[-1]+ '_mean'] + 0.01)
     df['c_cal_mean_ratio'] = df[cal_columns[-1]] / (merged_data_cal[cal_columns[-1]+ '_mean'] + 0.01)
-    ##df['c_bg_mean_ratio'] = df[bg_columns[-1]] / (merged_data_bg[bg_columns[-1]+ '_mean'] + 0.01)
+    #### df['c_bg_mean_ratio'] = df[bg_columns[-1]] / (merged_data_bg[bg_columns[-1]+ '_mean'] + 0.01)
 
+    # current time
     df['mins_since_12AM'] = ((pd.to_datetime(df['time'], format='%H:%M:%S') - datetime.strptime('00:00:00', '%H:%M:%S')).dt.total_seconds() / 60).astype('int')
+    
+    # sum of groups of variables along axis one
     df['total_steps'] = df[step_columns].sum(axis=1)
-    ##df['total_ins'] = df[ins_columns].sum(axis=1)
+    #### df['total_ins'] = df[ins_columns].sum(axis=1)
 
-    # df['last_steps_per_carb'] = df[step_columns[-1]] / (df[carb_columns[-1]]+0.01)
-    # df['last_ins_per_carb'] = df[ins_columns[-1]] / (df[carb_columns[-1]]+0.01)
-    ##df['total_steps_per_carb'] = df[step_columns].sum(axis=1) / (df[carb_columns].sum(axis=1) + 0.01)
-    ##df['total_ins_per_carb'] = df[ins_columns].sum(axis=1) / (df[carb_columns].sum(axis=1) + 0.01)
-
-    df['bg_change_ratio'] = df[bg_columns[-1]] / (df[bg_columns[-2]] + 0.01)
+    # change ratios (probar a aumentar la diferencia de tiempo. Valores cercanos tienen alta correlación)
+    df['bg_change_ratio'] = df[bg_columns[-1]] / (df[bg_columns[-2]] + 0.01) # alta importancia en XGBoost (analizar la importancia de manera experimental)
     df['ins_change_ratio'] = df[ins_columns[-1]] / (df[ins_columns[-2]] + 0.01)
-    # df['carb_change_ratio'] = df[carb_columns[-1]] / (df[carb_columns[-2]] + 0.01)
-    ##df['cals_change_ratio'] = df[cal_columns[-1]] / (df[cal_columns[-2]] + 0.01)
+    df['cals_change_ratio'] = df[cal_columns[-1]] / (df[cal_columns[-2]] + 0.01) # was dropped
 
+    # change ratios with 6 steps time delay
+    df['bg_change_ratio_d'] = df[bg_columns[-1]] / (df[bg_columns[-6]] + 0.01) # alta importancia en XGBoost (analizar la importancia de manera experimental)
+    df['ins_change_ratio_d'] = df[ins_columns[-1]] / (df[ins_columns[-6]] + 0.01)
+    df['cals_change_ratio_d'] = df[cal_columns[-1]] / (df[cal_columns[-6]] + 0.01) # was dropped
+
+    # approximate of the derivative
     df['ins_change_diff'] = (df[ins_columns[-1]] - df[ins_columns[-2]])
-    # df['carb_change_diff'] = (df[carb_columns[-1]] - df[carb_columns[-2]])
-    ##df['cals_change_diff'] = (df[cal_columns[-1]] - df[cal_columns[-2]])
-    ##df['bg_change_diff'] = (df[bg_columns[-1]] - df[bg_columns[-2]])
+    df['hr_change_diff'] = (df[hr_columns[-1]] - df[hr_columns[-2]])
+    df['cals_change_diff'] = (df[cal_columns[-1]] - df[cal_columns[-2]]) # was dropped
+    df['bg_change_diff'] = (df[bg_columns[-1]] - df[bg_columns[-2]]) # was dropped
 
-    # df['bg_last_6steps_mean'] = df[bg_columns[-6:]].mean(axis=1)
-    # df['ins_last_6steps_mean'] = df[ins_columns[-6:]].mean(axis=1)
-    # df['carb_last_6steps_mean'] = df[carb_columns[-6:]].mean(axis=1)
+    # approximate of the derivative with 6 steps time delay
+    df['ins_change_diff_d'] = (df[ins_columns[-1]] - df[ins_columns[-6]])
+    df['hr_change_diff_d'] = (df[hr_columns[-1]] - df[hr_columns[-6]])
+    #### df['cals_change_diff'] = (df[cal_columns[-1]] - df[cal_columns[-2]])
+    #### df['bg_change_diff'] = (df[bg_columns[-1]] - df[bg_columns[-2]])
 
-    df['bg_last_6steps_max'] = df[bg_columns[-6:]].max(axis=1)
-    df['ins_last_6steps_max'] = df[ins_columns[-6:]].max(axis=1)
-    # df['carb_last_6steps_max'] = df[carb_columns[-6:]].max(axis=1)
-
-    df['bg_last_6steps_min'] = df[bg_columns[-6:]].min(axis=1)
-    df['ins_last_6steps_min'] = df[ins_columns[-6:]].min(axis=1)
-    # df['carb_last_6steps_min'] = df[carb_columns[-6:]].min(axis=1)
-
-    df['bg_last_6steps_std'] = df[bg_columns[-6:]].std(axis=1)
-    # df['ins_last_6steps_std'] = df[ins_columns[-6:]].std(axis=1)
-    # df['carb_last_6steps_std'] = df[carb_columns[-6:]].std(axis=1)
-
+    # variable statistics in the last 6 steps
+    df['bg_last_6steps_diff'] = df[bg_columns[-6:]].max(axis=1) - df[bg_columns[-6:]].min(axis=1)
+    df['ins_last_6steps_diff'] = df[ins_columns[-6:]].max(axis=1) - df[ins_columns[-6:]].min(axis=1)
+    # df['bg_last_6steps_max'] = df[bg_columns[-6:]].max(axis=1)
+    # df['ins_last_6steps_max'] = df[ins_columns[-6:]].max(axis=1)
+    # df['bg_last_6steps_min'] = df[bg_columns[-6:]].min(axis=1)
+    # df['ins_last_6steps_min'] = df[ins_columns[-6:]].min(axis=1)
+    # df['bg_last_6steps_std'] = df[bg_columns[-6:]].std(axis=1)
     df['steps_last_6steps_total'] = df[step_columns[-6:]].sum(axis=1)
+    #### df['ins_last_6steps_std'] = df[ins_columns[-6:]].std(axis=1)
+    #### df['bg_last_6steps_mean'] = df[bg_columns[-6:]].mean(axis=1)
+    #### df['ins_last_6steps_mean'] = df[ins_columns[-6:]].mean(axis=1)
 
+    # variable interactions
     df['total_cals_per_steps'] = df[cal_columns].sum(axis=1) / (df[step_columns].sum(axis=1) + 0.01)
     df['last_cals_per_steps'] = df[cal_columns[-1]] / (df[step_columns[-1]] + 0.01)
-    ##df['total_ins_per_bg'] = df[ins_columns].sum(axis=1) / (df[bg_columns].sum(axis=1) + 0.01)
-    ##df['last_6_cals_per_step_sum'] = df[cal_columns[-6:]].sum(axis=1) / (df[step_columns[-6:]].sum(axis=1) + 0.01)
+    #### df['total_ins_per_bg'] = df[ins_columns].sum(axis=1) / (df[bg_columns].sum(axis=1) + 0.01)
+    #### df['last_6_cals_per_step_sum'] = df[cal_columns[-6:]].sum(axis=1) / (df[step_columns[-6:]].sum(axis=1) + 0.01)
+
+    # current time variable interactions
+    column_groups = [bg_columns[-1],ins_columns[-1],hr_columns[-1], step_columns[-1], cal_columns[-1]]
+
+    for idx, col_i in enumerate(column_groups):
+        for col_j in column_groups[(idx+1):]:
+            
+            # df[col_i.split('_')[0] + '+' + col_j.split('_')[0]] = df[col_i] + df[col_j]
+            # df[col_i.split('_')[0] + '-' + col_j.split('_')[0]] = df[col_i] - df[col_j]
+            df[col_i.split('_')[0] + '*' + col_j.split('_')[0]] = df[col_i] * df[col_j]
+            df[col_i.split('_')[0] + '/' + col_j.split('_')[0]] = df[col_i] / (df[col_j] + 0.001)
+
+    # remove odd-numbered bg columns to address high pairwise correlations.
+    columns_to_drop = [col for idx, col in enumerate(bg_columns) if idx % 2 == 0]
+    df = df.drop(columns_to_drop, axis=1)
 
     '''normalized_cals = (df[cal_columns] - df[cal_columns].mean(axis=0)) / df[cal_columns].std(axis=0)
     normalized_steps = (df[step_columns] - df[step_columns].mean(axis=0)) / df[step_columns].std(axis=0)

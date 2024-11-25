@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import xgboost as xgb
 from catboost import Pool, CatBoostRegressor
+import lightgbm as lgb 
 from pathlib import Path
 
 class Base_VotingRegressor:
@@ -21,14 +22,14 @@ class Base_VotingRegressor:
 
         return self.params
     
-    def fit(self, dtrain):
+    def fit(self, dtrain, fit_params = {}):
 
         self.trained_models = []
         params = self.params.copy()
 
         for idx in range(self.n_models):
 
-            self.trained_models.append(self._fit(dtrain, params, idx))
+            self.trained_models.append(self._fit(dtrain, idx, params, fit_params))
 
         return self.trained_models
     
@@ -59,7 +60,7 @@ class Base_VotingRegressor:
 
         return self.feature_importances
     
-    def _fit(self, dtrain, params, idx):
+    def _fit(self, dtrain, idx, params, fit_params):
         pass
 
     def _get_feature_importances(self, model):
@@ -70,13 +71,12 @@ class XGB_VotingRegressor(Base_VotingRegressor):
 
     def __init__(self, n_models, params = None):
         super().__init__(n_models, params)
-        
     
-    def _fit(self, dtrain, params, idx):
+    def _fit(self, dtrain, idx, params, fit_params):
 
         params.update({'seed': 42 + idx})
 
-        return xgb.train(params, dtrain)
+        return xgb.train(params, dtrain, **fit_params)
     
     def _get_feature_importances(self, model):
 
@@ -107,17 +107,17 @@ class XGB_VotingRegressor(Base_VotingRegressor):
         
         return model
 
-class CatBst_Voting_Regressor(Base_VotingRegressor):
+class CatBst_VotingRegressor(Base_VotingRegressor):
 
     def __init__(self, n_models, params=None):
         super().__init__(n_models, params)
 
-    def _fit(self, dtrain, params, idx):
+    def _fit(self, dtrain, idx, params, fit_params):
 
         params.update({'random_seed': 42 + idx})
-        model = CatBoostRegressor(**params, verbose=False)
+        model = CatBoostRegressor(**params)
 
-        return model.fit(dtrain)
+        return model.fit(dtrain, **fit_params)
     
     def _get_feature_importances(self, model):
 
@@ -143,7 +143,7 @@ class CatBst_Voting_Regressor(Base_VotingRegressor):
 
         files = list(Path.glob(path,'*.cbm'))
 
-        model = CatBst_Voting_Regressor(n_models=len(files))
+        model = CatBst_VotingRegressor(n_models=len(files))
 
         for f in files:
             
@@ -154,8 +154,49 @@ class CatBst_Voting_Regressor(Base_VotingRegressor):
         return model
 
 
+class LGBM_VotingRegressor(Base_VotingRegressor):
 
+    def __init__(self, n_models, params = None):
+        super().__init__(n_models, params)
+        
+    def _fit(self, dtrain, idx, params, fit_params):
 
+        params.update({'seed': 42 + idx})
+
+        return lgb.train(params, dtrain, **fit_params)
+    
+    def _get_feature_importances(self, model):
+
+        values = model.feature_importance()
+        names = model.feature_name()
+
+        fi_dict = {key:value for key, value in zip(names, values)}
+
+        return fi_dict
+    
+    def save_model(self, file_name):
+
+        for idx, model in enumerate(self.trained_models):
+
+            model.save_model(file_name / (file_name.name + '_' + str(idx) + '.bin'))
+
+    def get_feature_names(self):
+
+        return self.trained_models[0].feature_name()
+
+    @classmethod
+    def load(cls, path):
+
+        files = list(Path.glob(path,'*.bin'))
+
+        model = LGBM_VotingRegressor(n_models=len(files))
+
+        for f in files:
+            
+            booster = lgb.Booster(model_file=f)
+            model.trained_models.append(booster)
+        
+        return model
 
 
             

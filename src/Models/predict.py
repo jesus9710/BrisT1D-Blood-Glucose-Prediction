@@ -3,7 +3,7 @@ import pandas as pd
 from pathlib import Path
 import xgboost as xgb
 from catboost import Pool
-from model_wrappers import XGB_VotingRegressor, CatBst_Voting_Regressor
+from model_wrappers import XGB_VotingRegressor, CatBst_VotingRegressor, LGBM_VotingRegressor
 
 # paths
 DATA_PATH = Path(__file__).parents[2] / 'Data/Extended_Data'
@@ -12,9 +12,9 @@ PREDICTION_PATH = Path(__file__).parents[2] / 'predictions'
 MODEL_PATH = Path(__file__).parents[2] / 'Models'
 
 # constants
-model_architecture = "XGBoost"
-model_name = 'EDx1_FEv3_5mins_3VR_XGBoost_optimized_CV'
-submission_name = 'EDx1_FEv3_5m_3VR_XGBoost_opt_CV.csv'
+model_architecture = "LGBM"
+model_name = 'EDx1_FEv4_5m_3VR_LGBM_opt_CV'
+submission_name = 'EDx1_FEv4_5m_3VR_LGBM_opt_CV.csv'
 n_splits = 9
 make_submission = True
 
@@ -29,7 +29,11 @@ if model_architecture == "XGBoost":
 
 elif model_architecture == "CatBoost":
     dtest = Pool(X_test)
-    model = CatBst_Voting_Regressor.load(MODEL_PATH/model_name)
+    model = CatBst_VotingRegressor.load(MODEL_PATH/model_name)
+
+elif model_architecture == "LGBM":
+    dtest = X_test
+    model = LGBM_VotingRegressor.load(MODEL_PATH/model_name)
 
 # predictions
 predictions = model.predict(dtest)

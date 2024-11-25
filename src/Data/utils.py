@@ -385,39 +385,6 @@ def impute_and_encode_hr(df, encode_dictionary, steps_to_impute, drop_other_cols
 
     return df
 
-def impute_cals(cals_mean_by_per_and_hour, impute_dict=None):
-    '''
-    This function is used to impute missing values of burnt calories
-    '''
-
-    # obtain participants with missing calorie values, in the dataset grouped by p_num and time
-    nulls_count = cals_mean_by_per_and_hour.groupby('p_num').apply(lambda group: group.isnull().sum()).sum(axis=1)
-    p_nums = nulls_count[nulls_count>0].index
-
-    for p_num in p_nums:
-        
-        # get participant dataset grouped by time
-        person_dataframe = cals_mean_by_per_and_hour.loc[p_num]
-        null_index = person_dataframe.isnull().any(axis=1)[person_dataframe.isnull().any(axis=1)].index
-
-        # if the sleep factor is applied to a participant, it is assumed that the missing values correspond to nighttime hours
-        if impute_dict:
-            sleep_factor = impute_dict[p_num] if p_num in impute_dict.keys() else 1
-        else:
-            sleep_factor = 1
-
-        # get the basal metabolic rate (BMR) to impute missing values in the dataset grouped by p_num and time
-        daily_cals = cals_mean_by_per_and_hour.loc[p_num].sum(axis=0)
-        not_null_cals_count = cals_mean_by_per_and_hour.loc[p_num].apply(lambda group: group.notnull().sum())
-
-        BMR = (daily_cals / not_null_cals_count).median()
-
-        # impute missing values with BMR
-        for index in null_index:
-            cals_mean_by_per_and_hour.loc[(p_num,index),:] = cals_mean_by_per_and_hour.loc[(p_num,index),:].fillna(BMR*sleep_factor)
-
-    return cals_mean_by_per_and_hour
-
 def mean_ffill_bfill_imputation(df, columns):
 
     df_ffill = df.copy()
@@ -438,3 +405,27 @@ def mean_ffill_bfill_imputation(df, columns):
     df[columns] = df[columns].fillna(df_combined[columns])
 
     return df
+
+def impute_cals(cals_mean_by_per_and_hour, impute_dict=None):
+    '''
+    This function is used to impute missing values of cals_mean_by_per_and_hour dataset.
+    The values are filled with a blend of ffill and bfill due to high correlation betwen two consecutive columns.
+    If there are still missing values, they are imputed with BMR (calculated in a 5-minute interval)
+    '''
+
+    # iterate for each participant
+    for p_num, group in cals_mean_by_per_and_hour.groupby(level=0):
+
+        # the imputation dictionary is used to obtain a sleep factor, in case it is observed that a participant is missing values at night.
+        sleep_factor = impute_dict[p_num] if p_num in impute_dict.keys() else 1
+
+        # calculate BMR in a 5-minute interval
+        BMR = group.median(axis=0, skipna=True).median()
+        
+        # fill missing values with ffill and bfill
+        group = mean_ffill_bfill_imputation(group, cals_mean_by_per_and_hour.columns)
+
+        # if there are still missing values, impute them with BMR
+        cals_mean_by_per_and_hour.loc[p_num] = group.fillna(BMR * sleep_factor)
+    
+    return cals_mean_by_per_and_hour

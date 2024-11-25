@@ -11,11 +11,11 @@ TRAIN_DATA_FILE = DATA_PATH / 'extended_train.csv'
 SUBMISSION_PATH = Path(__file__).parents[2] / 'submissions'
 
 # constants
-model_architecture = "XGBoost"
+model_architecture = "CatBoost"
 optimize_optuna = True
 n_splits = 9
-subsample_quantity = 0
-n_trials = 200
+subsample_quantity = None
+n_trials = 50
 
 # load data
 train = pd.read_csv(TRAIN_DATA_FILE)

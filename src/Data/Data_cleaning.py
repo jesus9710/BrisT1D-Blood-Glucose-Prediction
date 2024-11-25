@@ -71,31 +71,19 @@ expanded_time_data = expand_time_clusters(data_with_scores, time_len, skipna=Fal
 
 # %%drop columns
 carb_columns = [col for col in expanded_time_data.columns if re.search('carbs_.*', col)]
-hr_columns = [col for col in expanded_time_data.columns if re.search('hr_.*', col)]
-to_drop = carb_columns + hr_columns
+# hr_columns = [col for col in expanded_time_data.columns if re.search('hr_.*', col)]
+to_drop = carb_columns
 
 filled_data = expanded_time_data.drop(to_drop, axis=1)
 
-# %% impute missing values for steps, insulin and cals columns with 0
-columns = list(filled_data.columns)
-to_fill = [col for col in columns if re.search(r'steps_.*|insulin_.*|cals_.*',col)]
-
-filled_data[to_fill] = filled_data[to_fill].fillna(value=0)
-
 # %% impute missing values for bg
-bg_columns = [col for col in expanded_time_data.columns if re.search(r'bg_.*', col)]
+columns = list(filled_data.columns)
+bg_columns = [col for col in columns if re.search(r'bg_.*', col)]
+#hr_columns = [col for col in columns if re.search('hr_.*', col)]
 filled_data = mean_ffill_bfill_imputation(filled_data, bg_columns)
+#filled_data = mean_ffill_bfill_imputation(filled_data, hr_columns)
 
-#%% impute missing values for calorie variables
-'''cals_columns = [col for col in columns if re.search(r'cals_.*',col)]
-cals_mean_by_per_and_hour = filled_data.groupby(by=['p_num','time'])[cals_columns].mean()
-
-cals_mean_by_per_and_hour = impute_cals(cals_mean_by_per_and_hour, sleep_dict)
-merged_data_cals = filled_data.merge(cals_mean_by_per_and_hour, on=['p_num', 'time'], suffixes=('', '_mean'))
-for col in cals_columns:
-    filled_data[col] = filled_data[col].fillna(merged_data_cals[col + '_mean'])
-'''
-# %%get dataset grouped by person and time
+# %% get dataset grouped by person and time
 bg_columns = [col for col in expanded_time_data.columns if re.search('bg_.*', col)]
 mean_by_per_and_hour = filled_data.groupby(by=['p_num','time'])[bg_columns].mean()
 
@@ -108,7 +96,6 @@ for p_num in p_null_list:
     mean_by_per_and_hour = interpolate_and_fill_rows(p_num, mean_by_per_and_hour, n_iters = 10)
 
 # interpolation through columns
-
 p_null_list = get_participants_with_null_values(mean_by_per_and_hour)
 
 for p_num in p_null_list:
@@ -119,6 +106,11 @@ for p_num in p_null_list:
 merged_data = filled_data.merge(mean_by_per_and_hour, on=['p_num', 'time'], suffixes=('', '_mean'))
 for col in bg_columns:
     filled_data[col] = filled_data[col].fillna(merged_data[col + '_mean'])
+
+# %% impute missing values for steps, insulin and cals columns with 0
+to_fill = [col for col in columns if re.search(r'steps_.*|insulin_.*|cals_.*|hr_.*',col)]
+
+filled_data[to_fill] = filled_data[to_fill].fillna(value=-1)
 
 #%% export to csv
 clean_train_data = pd.concat([filled_data.iloc[train_index,:], filled_data.iloc[new_train_index,:]], axis=0).reset_index(drop=True)

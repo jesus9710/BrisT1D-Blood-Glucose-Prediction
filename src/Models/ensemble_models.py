@@ -13,7 +13,7 @@ TEST_DATA_FILE = DATA_PATH / 'extended_test.csv'
 
 #%% constants
 
-submission_name = 'Ensemble_XGB_CB_1xED_FEv1_5m_opt.csv'
+submission_name = 'Ensemble_XGB_CatB_LGBM_1xED_FEv4_5m_opt.csv'
 
 # %% spredictions to ensemble
 

@@ -22,13 +22,16 @@ def get_optimizer_for_XGBoost(df_train, n_splits, train_cols):
         scores = []
         for fold in range(n_splits):
 
+            num_boost_round = trial.suggest_int('num_boost_round', 50, 500, log=True)
+
             _df_train = df_train[df_train["fold"] != fold].reset_index(drop=True)
             _df_valid = df_train[df_train["fold"] == fold].reset_index(drop=True)
 
             dtrain = xgb.DMatrix(_df_train[train_cols], label=_df_train["bg+1:00"])
-            gbm = xgb.train(param, dtrain)
+            dval = xgb.DMatrix(_df_valid[train_cols], label = _df_valid["bg+1:00"])
 
-            dval = xgb.DMatrix(_df_valid[train_cols])
+            gbm = xgb.train(param, dtrain, num_boost_round, evals=[(dval,'validation')], early_stopping_rounds=50, verbose_eval=False)
+            
             preds = gbm.predict(dval)
             score = root_mean_squared_error(_df_valid["bg+1:00"], preds)
 
