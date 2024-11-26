@@ -1,4 +1,4 @@
-# %% libs
+# libs
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -10,31 +10,31 @@ from sklearn.metrics import root_mean_squared_error
 from model_wrappers import XGB_VotingRegressor, CatBst_VotingRegressor, LGBM_VotingRegressor
 import os
 
-# %% paths
+# paths
 DATA_PATH = Path(__file__).parents[2] / 'Data/Extended_Data'
 TRAIN_DATA_FILE = DATA_PATH / 'extended_train.csv'
 MODEL_PATH = Path(__file__).parents[2] / 'Models'
 
-# %% constants
-model_architecture = "CatBoost"
-model_name = 'EDx1_FEv4_5m_3VR_CatB_opt_CV'
+# constants
+model_architecture = "LGBM"
+model_name = 'EDx1_FEv4_TW1h_RW5m_3VR_LGBM_CV'
 n_splits = 9
 save_model = True
 
-# %% load data
+# load data
 train = pd.read_csv(TRAIN_DATA_FILE)
 
-# %% get splits grouped by participants
+# get splits grouped by participants
 gkf = GroupKFold(n_splits)
 
 for fold, (_, val_) in enumerate(gkf.split(X=train, y=train['bg+1:00'], groups=train['p_num'])):
 
     train.loc[val_,'fold'] = int(fold)
 
-# %% Train XGBoost ensembles by cross validation 
+# Train XGBoost ensembles by cross validation 
 if model_architecture == "XGBoost":
 
-    XGB_models = []
+    cv_models = []
     scores = []
 
     XGBparams = {
@@ -73,19 +73,29 @@ if model_architecture == "XGBoost":
         model.fit(dtrain, XGBfit_params)
         score = root_mean_squared_error(y_val, model.predict(dval))
 
-        XGB_models.append(model)
+        cv_models.append(model)
         scores.append(score)
 
     print(scores)
     print(np.mean(scores))
 
-# %% Train Catboost ensembles by cross validation
+# Train Catboost ensembles by cross validation
 if model_architecture == "CatBoost":
 
-    CBst_models = []
+    cv_models = []
     scores = []
 
     CBstparams = {
+        'task_type':'GPU',
+        'loss_function': 'RMSE',
+        'depth': 7,
+        'l2_leaf_reg': 9.051774802524779,
+        'bagging_temperature': 3.806808172077562,
+        'random_strength': 4.304492295614633,
+        'min_data_in_leaf': 9,
+        'verbose' : False}
+
+    '''CBstparams = {
         'task_type':'GPU',
         'loss_function': 'RMSE',
         'depth': 5,
@@ -94,7 +104,7 @@ if model_architecture == "CatBoost":
         'random_strength': 0.057645267420365354,
         'min_data_in_leaf': 10,
         'verbose' : False
-        }
+        }'''
 
     CBstfit_params = {'early_stopping_rounds' : 30}
 
@@ -116,16 +126,16 @@ if model_architecture == "CatBoost":
         model.fit(dtrain, CBstfit_params)
         score = root_mean_squared_error(y_val, model.predict(dval))
 
-        CBst_models.append(model)
+        cv_models.append(model)
         scores.append(score)
 
     print(scores)
     print(np.mean(scores))
 
-# %% Train LGBM ensembles by cross validation
+# Train LGBM ensembles by cross validation
 if model_architecture == "LGBM":
 
-    LGBM_models = []
+    cv_models = []
     scores = []
 
     LGBMparams = {'verbosity': 0}
@@ -147,13 +157,19 @@ if model_architecture == "LGBM":
         model.fit(dtrain)
         score = root_mean_squared_error(y_val, model.predict(X_val))
 
-        LGBM_models.append(model)
+        cv_models.append(model)
         scores.append(score)
 
     print(scores)
     print(np.mean(scores))
 
-# %% save model
+# save model
 if save_model:
     os.makedirs(MODEL_PATH / model_name, exist_ok=True)
-    model.save_model(MODEL_PATH / model_name)
+
+    for idx, cv_model in enumerate(cv_models):
+        
+        model_name_fold = model_name + f'_fold_{idx}'
+        
+        os.makedirs(MODEL_PATH / model_name / model_name_fold, exist_ok=True)
+        cv_model.save_model(MODEL_PATH /model_name / model_name_fold)
