@@ -198,6 +198,71 @@ class LGBM_VotingRegressor(Base_VotingRegressor):
         
         return model
 
+class Base_Stacking_Regressor:
 
-            
+    def __init__(self, *estimators):
+
+        self.estimators = estimators
+        self.trained_meta_model = None
+
+    def fit_meta(self, data, label, fit_params = {}):
+
+        predictions = self._base_predict(data, label)
+        self.trained_meta_model = self._fit_meta(predictions, label, fit_params)
+        
+        return self.trained_meta_model
+    
+    def predict(self, dtest):
+
+        predictions = self._base_predict(dtest)
+
+        return predictions
+    
+    def _base_predict(self, data, label = None):
+
+        predictions = []
+
+        for estimator in self.estimators:
+
+            adapted_data = self._adapt_dataset(estimator, data, label)
+            predictions.append(estimator.predict(adapted_data))
+
+        predictions_array = np.array(predictions).transpose()
+
+        return predictions_array
+    
+    def _adapt_dataset(self, estimator, data, label = None):
+
+        if isinstance(estimator, XGB_VotingRegressor):
+            data = xgb.DMatrix(data, label)
+        
+        elif isinstance(estimator, CatBoostRegressor):
+            data = Pool(data, label)
+
+        elif isinstance(estimator, LGBM_VotingRegressor):
+            # data = lgb.Dataset(data, label)
+            pass
+
+        return data
+
+class XGB_Stacking_Regressor(Base_Stacking_Regressor):
+
+    def __init__(self, meta_learner_params, *estimators):
+
+        super().__init__(*estimators)
+
+        self.params = meta_learner_params
+
+    def predict(self, dtest):
+
+        base_predictions = super().predict(dtest)
+        base_predictions = xgb.DMatrix(base_predictions)
+
+        return self.trained_meta_model.predict(base_predictions)
+
+    def _fit_meta(self, Xdata, label, fit_params):
+
+        d_train = xgb.DMatrix(Xdata, label)
+
+        return xgb.train(self.params, d_train, **fit_params)
 
