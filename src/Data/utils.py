@@ -75,7 +75,7 @@ def reduce_time_window(df, time_window):
 
     return reduced_data
 
-def generate_time_lags(column_names, hours):
+def generate_time_spans(column_names, hours):
     '''
     generate column names for each category in 5-minute intervals
     '''
@@ -91,59 +91,67 @@ def generate_time_lags(column_names, hours):
 
     return new_column_names
 
-def expand_data(df, time_window):
+def generate_time_spans(hours, name=''):
+    '''
+    generate column names for each category in 5-minute intervals
+    '''
+    h_list = []
+
+    for h in range(hours):
+        h_list += [f'{name}-{h}:0'+str(i) if i<10 else f'{name}-{h}:'+str(i) for i in range(0,60,5)]
+
+    return h_list
+
+def expand_data(df, time_window, n_times=1, one_hour = 12, n_hours=6):
     '''
     Get more data by reducing time window used for predictions
     '''
+
+    features = ['bg','insulin','carbs','hr','steps','cals','activity']
+    h_list = generate_time_spans(n_hours)
+    time_columns = [col for col in df.columns if re.search(r'[0-9]:[0-9].*',col)]
+    new_times = h_list[:(time_window*one_hour)]
+
+    new_dfs = []
+
+    for i in range(n_times):
+        # define time ranges
+        old_start = -(time_window * one_hour + i)
+        old_end = -i if i else None
+        old_times = h_list[old_start:old_end]
+        new_label_time = h_list[old_start - one_hour]
+
+        # generate old and new columns
+        new_columns = [f'{feat}{lag}' for feat in features for lag in new_times]
+        old_columns = [f'{feat}{lag}' for feat in features for lag in old_times]
+        new_label = f'bg{new_label_time}'
+
+        # get renamed dataframe
+        renamed_data = pd.DataFrame(
+            df[old_columns + [new_label]].values,
+            columns= new_columns + ['bg+1:00']
+        )
+
+        # create new dataframe with updated times
+        new_df = pd.concat([df.drop(time_columns, axis=1), renamed_data], axis=1)
+        new_df['time'] = (pd.to_datetime(new_df['time'],format='%H:%M:%S') \
+                          - timedelta(hours=n_hours - time_window)).dt.time.astype('str')
+        new_df['id'] = new_df['id'] + '_new' + f'_{i}'
+
+        # append data
+        new_dfs.append(new_df)
     
-    columns = list(df.columns)
-    not_time_columns = [col for col in columns if not(re.search(r'[0-9]:[0-9].*',col))]
-    column_filter = [r'bg-.*',r'insulin-.*',r'carbs-.*',r'hr-.*',r'steps-.*',r'cals-.*',r'activity-.*']
-    
-    # get time window for original dataset
-    start_time = datetime.strptime(str(6 - time_window), '%H')
-    end_time = start_time + timedelta(hours=time_window-1, minutes=55)
+    # concatenate data and drop duplicates and rows with missing target values
+    extended_df = pd.concat([df] + new_dfs, axis=0, ignore_index=True)
+    extended_df = extended_df.dropna(subset=['bg+1:00'], axis=0, ignore_index=True)
+    extended_df = extended_df.drop_duplicates(subset=new_columns + ['bg+1:00'], ignore_index=True)
 
-    old_columns = []
-    new_columns = []
+    return extended_df
 
-    for filter in column_filter:
-        
-        # get new column names by generating a new time window
-        name = filter.split('-')[0]
-        column_group = [col for col in columns if re.search(filter,col)]
-        new_columns += list(generate_time_lags([name], time_window).values())[0]
-
-        old_columns_aux = []
-
-        # get column names of original dataset that represents the time window
-        for col in column_group:
-            column_date = datetime.strptime(col.split('-')[1],'%H:%M')
-
-            if (column_date >= start_time) and (column_date<=end_time):
-                old_columns_aux.append(col)
-
-        old_columns_aux.sort()
-        old_columns += old_columns_aux
-    
-    # get the new bg+1:00
-    new_bgp1h = (start_time - timedelta(hours=1)).time().isoformat(timespec='minutes')
-
-    # create the new dataframe, modify current time variable and assign new ids
-    new_df = df[not_time_columns].copy()
-    new_df['time'] = (pd.to_datetime(new_df['time'],format='%H:%M:%S') - timedelta(hours=6-time_window)).dt.time.astype('str')
-    new_df['bg+1:00'] = df['bg-'+str(new_bgp1h[1:])].copy()
-    new_df['id'] = new_df['id'] + '_new'
-
-    #get the rest variables from original df
-    renamed_df = df[old_columns].copy()
-    renamed_df.columns = new_columns
-
-    new_df = pd.concat([new_df, renamed_df], axis=1)
-
-    return new_df.dropna(subset=['bg+1:00'])
-
-def expand_time_clusters(df, time_len, skipna = True):
+def aggregate_time_series(df, time_len, skipna = True):
+    '''
+    This function is used to aggregate the 5-minute intervals of each time variable into a larger interval
+    '''
 
     columns = list(df.columns)
     column_filter = [r'bg-.*',r'insulin-.*',r'carbs-.*',r'hr-.*',r'steps-.*',r'cals-.*',r'activity-.*']
