@@ -75,22 +75,6 @@ def reduce_time_window(df, time_window):
 
     return reduced_data
 
-def generate_time_spans(column_names, hours):
-    '''
-    generate column names for each category in 5-minute intervals
-    '''
-
-    new_column_names = {}
-    for name in column_names:
-        h_list = []
-
-        for h in range(hours):
-            h_list += [f'{name}-{h}:0'+str(i) if i<10 else f'{name}-{h}:'+str(i) for i in range(0,60,5)]
-
-        new_column_names.update({name:h_list})
-
-    return new_column_names
-
 def generate_time_spans(hours, name=''):
     '''
     generate column names for each category in 5-minute intervals
