@@ -1,6 +1,7 @@
 import numpy as np
 import xgboost as xgb
 from catboost import CatBoostRegressor, Pool
+import lightgbm as lgb
 from sklearn.metrics import root_mean_squared_error
 
 def get_optimizer_for_XGBoost(df_train, n_splits, train_cols):
@@ -9,6 +10,7 @@ def get_optimizer_for_XGBoost(df_train, n_splits, train_cols):
         param = {
             "objective": "reg:squarederror",
             "eval_metric": "rmse",
+            # "learning_rate": trial.suggest_float("learning_rate", 0.001, 0.3,log=True),
             "lambda": trial.suggest_float("lambda", 1e-8, 10.0, log=True),
             "alpha": trial.suggest_float("alpha", 1e-8, 10.0, log=True),
             "min_child_weight": trial.suggest_float("min_child_weight", 0.001,20.0),
@@ -84,15 +86,17 @@ def get_optimizer_for_LGBM(df_train, n_splits, train_cols):
             "objective": "regression",
             "metric": "rmse",
             "num_leaves" : trial.suggest_int("num_leaves",20,300),
-            "max_depth" : trial.suggest_int("max_depth",3,15),
-            "n_estimators" : trial.suggest_int("n_estimators",100,10000),
-            "min_data_in_leaf" : trial.suggest_int("min_data_in_leaf",10,100),
-            "lambda_l1" : trial.suggest_float("lambda_l1",0.0,10.0),
-            "lambda_l2" : trial.suggest_float("lambda_l2",0.0,10.0),
-            "feature_fraction" : trial.suggest_float("feature_fraction",0.3,1.0),
-            "bagging_fraction" : trial.suggest_float("bagging_fraction",0.5,1.0),
-            "bagging_freq" : trial.suggest_int("bagging_freq",1,5)
+            "learning_rate": trial.suggest_float("learning_rate", 0.001, 0.3,log=True),
+            "feature_fraction" : trial.suggest_float('feature_fraction', 0.6, 1.0),
+            "bagging_fraction": trial.suggest_float('bagging_fraction', 0.6, 1.0),
+            "lambda_l1": trial.suggest_float('lambda_l1', 1e-8, 10.0, log=True),
+            "lambda_l2": trial.suggest_float('lambda_l2', 1e-8, 10.0, log=True),
+            "min_data_in_leaf": trial.suggest_int('min_data_in_leaf', 5, 50),
+            "max_depth" : trial.suggest_int("max_depth",3,20),
+            "verbosity" : -1
         }
+
+        num_boost_round = trial.suggest_int('num_boost_round', 50, 1000, log=True)
 
         scores = []
         for fold in range(n_splits):
@@ -100,15 +104,16 @@ def get_optimizer_for_LGBM(df_train, n_splits, train_cols):
             _df_train = df_train[df_train["fold"] != fold].reset_index(drop=True)
             _df_valid = df_train[df_train["fold"] == fold].reset_index(drop=True)
 
-            dtrain = Pool(_df_train[train_cols], label=_df_train["bg+1:00"])
-            model = CatBoostRegressor(**param)
-            dval = Pool(_df_valid[train_cols], _df_valid["bg+1:00"])
+            dtrain = lgb.Dataset(_df_train[train_cols], label=_df_train["bg+1:00"])
+            dval = lgb.Dataset(_df_valid[train_cols], _df_valid["bg+1:00"])
 
-            cbm = model.fit(dtrain,
-                            eval_set=dval,
-                            early_stopping_rounds=30)
+            bst = lgb.train(param,
+                            dtrain,
+                            valid_sets=[dval],
+                            num_boost_round = num_boost_round,
+                            callbacks=[lgb.early_stopping(stopping_rounds=30, verbose=0)])
 
-            preds = cbm.predict(dval)
+            preds = bst.predict(_df_valid[train_cols])
             score = root_mean_squared_error(_df_valid["bg+1:00"], preds)
 
             scores.append(score)

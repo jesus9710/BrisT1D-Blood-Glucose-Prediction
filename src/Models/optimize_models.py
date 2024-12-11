@@ -39,7 +39,7 @@ elif model_architecture == "CatBoost":
     objective_fn = get_optimizer_for_CatBoost(train, n_splits, training_cols)
 
 elif model_architecture == "LGBM":
-    pass
+    objective_fn = get_optimizer_for_LGBM(train, n_splits, training_cols)
 
 if optimize_optuna:
         
